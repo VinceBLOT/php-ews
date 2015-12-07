@@ -1,4 +1,6 @@
 <?php
+ini_set('max_execution_time', 0);
+
 require_once('ExchangeWebServices.php');
 require_once('NTLMSoapClient.php');
 require_once('NTLMSoapClient/Exchange.php');
@@ -24,9 +26,6 @@ $request->ItemShape->BaseShape = EWSType_DefaultShapeNamesType::DEFAULT_PROPERTI
 
 $request->Traversal = EWSType_ItemQueryTraversalType::SHALLOW;
 
-
-
-
 $request->ParentFolderIds = new EWSType_NonEmptyArrayOfBaseFolderIdsType();
 
 $request->ParentFolderIds->FolderId = new EWSType_FolderIdType();
@@ -34,28 +33,65 @@ $request->ParentFolderIds->FolderId->Id = 'AAAUAHYtYmxvdEBsZWdhbGxhaXMuY29tAC4AA
 $request->ParentFolderIds->FolderId->ChangeKey = 'AQAAABYAAABla0CuDneeTaH1UA0HX96qAAFosmUp';
 
 // request
-$response = $ews->FindItem($request);
+$result = $ews->FindItem($request);
+if ($result->ResponseMessages->FindItemResponseMessage->ResponseCode == 'NoError' && $result->ResponseMessages->FindItemResponseMessage->ResponseClass == 'Success')
+{
+    $count = $result->ResponseMessages->FindItemResponseMessage->RootFolder->TotalItemsInView;
+    for ($i = 0; $i < $count; $i++){
+        $message_id = $result->ResponseMessages->FindItemResponseMessage->RootFolder->Items->Message[$i]->ItemId->Id;
+        $request = new EWSType_GetItemType();
 
-echo '<pre>'; var_dump($response);
+        $request->ItemShape = new EWSType_ItemResponseShapeType();
+        $request->ItemShape->BaseShape = EWSType_DefaultShapeNamesType::ALL_PROPERTIES;
 
-/*
-[13] => stdClass Object
-  (
-      [FolderId] => stdClass Object
-          (
-              [Id] => AAAUAHYtYmxvdEBsZWdhbGxhaXMuY29tAC4AAAAAAMPesS06BSxGv2vT074n9t0BAGVrQK4Od55NofVQDQdf3qoAAWioEzQAAA==
-              [ChangeKey] => AQAAABYAAABla0CuDneeTaH1UA0HX96qAAFosmUp
-          )
+        $request->ItemIds = new EWSType_NonEmptyArrayOfBaseItemIdsType();
+        $request->ItemIds->ItemId = new EWSType_ItemIdType();
+        $request->ItemIds->ItemId->Id = $message_id;
 
-      [ParentFolderId] => stdClass Object
-          (
-              [Id] => AAAUAHYtYmxvdEBsZWdhbGxhaXMuY29tAC4AAAAAAMPesS06BSxGv2vT074n9t0BAGVrQK4Od55NofVQDQdf3qoAAAAAAQkAAA==
-              [ChangeKey] => AQAAAA==
-          )
+        $response = $ews->GetItem($request);
+        //print_r($response);exit;
+        if( $response->ResponseMessages->GetItemResponseMessage->ResponseCode == 'NoError' &&
+            $response->ResponseMessages->GetItemResponseMessage->ResponseClass == 'Success' ) {
 
-      [FolderClass] => IPF.Note
-      [DisplayName] => Export SARA
-      [TotalCount] => 3
-      [ChildFolderCount] => 0
-      [UnreadCount] => 0
-  )*/
+            $message = $response->ResponseMessages->GetItemResponseMessage->Items->Message;
+
+            if($message) {
+                //if(date("Y-m-d",strtotime($message->DateTimeReceived)) == date("Y-m-d")) {
+
+                    if(!empty($message->Attachments->FileAttachment)) {
+                        // FileAttachment attribute can either be an array or instance of stdClass...
+                        $attachments = array();
+                        if(is_array($message->Attachments->FileAttachment) === FALSE ) {
+                            $attachments[] = $message->Attachments->FileAttachment;
+                        }
+                        else {
+                            $attachments = $message->Attachments->FileAttachment;
+                        }
+
+                        foreach($attachments as $attachment) {
+                            $request = new EWSType_GetAttachmentType();
+                            $request->AttachmentIds = new EWSType_NonEmptyArrayOfRequestAttachmentIdsType();
+                            $request->AttachmentIds->AttachmentId = new EWSType_RequestAttachmentIdType();
+                            $request->AttachmentIds->AttachmentId->Id = $attachment->AttachmentId->Id;
+                            $response = $ews->GetAttachment($request);
+
+                            // Assuming response was successful ...
+                            $attachments = $response->ResponseMessages->GetAttachmentResponseMessage->Attachments;
+                            $content = $attachments->FileAttachment->Content;
+
+                            if($message->Subject == "Export - Liste des lots") {
+                                file_put_contents('MARCHE/'.$attachment->Name, $content);
+                            }
+                            if($message->Subject == "Export - Liste des groupes") {
+                                file_put_contents('GROUPE/'.$attachment->Name, $content);
+                            }
+                            if($message->Subject == "Export - Liste des chantiers") {
+                                file_put_contents('CHANTIER/'.$attachment->Name, $content);
+                            }
+                        }
+                    }
+                //}
+            }
+        }
+    }
+}
